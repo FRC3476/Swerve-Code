@@ -4,6 +4,8 @@ import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import edu.wpi.first.wpilibj.DriverStation;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
@@ -16,41 +18,41 @@ import java.util.function.Function;
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class SendableCommand {
 
-    @JsonProperty("methodName") public final String methodName;
+    @JsonProperty("methodName")
+    public final @NotNull String methodName;
 
-    @JsonProperty("args") public final String[] args;
+    @JsonProperty("args") public final String @NotNull [] args;
 
     @JsonProperty("argTypes") public final String[] argTypes;
 
     @JsonProperty("reflection") public final boolean reflection;
 
-    public static Map<String, Function<String, Object>> inferableTypesParser;
+    private static final @NotNull Map<String, Function<String, Object>> INFERABLE_TYPES_PARSER;
 
     static {
-        inferableTypesParser = new HashMap<>();
-        inferableTypesParser.put(int.class.getName(), Integer::parseInt);
-        inferableTypesParser.put(double.class.getName(), Double::parseDouble);
-        inferableTypesParser.put(float.class.getName(), Float::parseFloat);
-        inferableTypesParser.put(long.class.getName(), Long::parseLong);
-        inferableTypesParser.put(short.class.getName(), Short::parseShort);
-        inferableTypesParser.put(byte.class.getName(), Byte::parseByte);
-        inferableTypesParser.put(char.class.getName(), s -> s.charAt(0));
-        inferableTypesParser.put(boolean.class.getName(), Boolean::parseBoolean);
-        inferableTypesParser.put(String.class.getName(), s -> s);
-        inferableTypesParser.put(Integer.class.getName(), Integer::valueOf);
-        inferableTypesParser.put(Double.class.getName(), Double::valueOf);
-        inferableTypesParser.put(Float.class.getName(), Float::valueOf);
-        inferableTypesParser.put(Long.class.getName(), Long::valueOf);
-        inferableTypesParser.put(Short.class.getName(), Short::valueOf);
-        inferableTypesParser.put(Byte.class.getName(), Byte::valueOf);
-        inferableTypesParser.put(Character.class.getName(), s -> Character.valueOf(s.charAt(0)));
-        inferableTypesParser.put(Boolean.class.getName(), Boolean::valueOf);
+        INFERABLE_TYPES_PARSER = new HashMap<>();
+        INFERABLE_TYPES_PARSER.put(int.class.getName(), Integer::parseInt);
+        INFERABLE_TYPES_PARSER.put(double.class.getName(), Double::parseDouble);
+        INFERABLE_TYPES_PARSER.put(float.class.getName(), Float::parseFloat);
+        INFERABLE_TYPES_PARSER.put(long.class.getName(), Long::parseLong);
+        INFERABLE_TYPES_PARSER.put(short.class.getName(), Short::parseShort);
+        INFERABLE_TYPES_PARSER.put(byte.class.getName(), Byte::parseByte);
+        INFERABLE_TYPES_PARSER.put(char.class.getName(), s -> s.charAt(0));
+        INFERABLE_TYPES_PARSER.put(boolean.class.getName(), Boolean::parseBoolean);
+        INFERABLE_TYPES_PARSER.put(String.class.getName(), s -> s);
+        INFERABLE_TYPES_PARSER.put(Integer.class.getName(), Integer::valueOf);
+        INFERABLE_TYPES_PARSER.put(Double.class.getName(), Double::valueOf);
+        INFERABLE_TYPES_PARSER.put(Float.class.getName(), Float::valueOf);
+        INFERABLE_TYPES_PARSER.put(Long.class.getName(), Long::valueOf);
+        INFERABLE_TYPES_PARSER.put(Short.class.getName(), Short::valueOf);
+        INFERABLE_TYPES_PARSER.put(Byte.class.getName(), Byte::valueOf);
+        INFERABLE_TYPES_PARSER.put(Character.class.getName(), s -> Character.valueOf(s.charAt(0)));
+        INFERABLE_TYPES_PARSER.put(Boolean.class.getName(), Boolean::valueOf);
     }
 
-
     @JsonCreator
-    public SendableCommand(@JsonProperty("methodName") String methodName,
-                           @JsonProperty("args") String[] args,
+    public SendableCommand(@JsonProperty("methodName") @NotNull String methodName,
+                           @JsonProperty("args") String @NotNull [] args,
                            @JsonProperty("argTypes") String[] argTypes,
                            @JsonProperty("reflection") boolean reflection) {
         Method methodToCall = null;
@@ -65,8 +67,8 @@ public class SendableCommand {
 
         for (int i = 0; i < args.length; i++) {
             try {
-                if (inferableTypesParser.containsKey(argTypes[i])) {
-                    objArgs[i] = inferableTypesParser.get(argTypes[i]).apply(args[i]);
+                if (INFERABLE_TYPES_PARSER.containsKey(argTypes[i])) {
+                    objArgs[i] = INFERABLE_TYPES_PARSER.get(argTypes[i]).apply(args[i]);
                 } else {
                     objArgs[i] = Enum.valueOf(Class.forName(argTypes[i]).asSubclass(Enum.class), args[i]);
                 }
@@ -91,12 +93,13 @@ public class SendableCommand {
 
             try {
                 Class<?> cls = Class.forName(className);
-                Class[] typeArray = Arrays.stream(objArgs).sequential().map(Object::getClass).toArray(Class[]::new);
+                Class<?>[] typeArray = Arrays.stream(objArgs).sequential().map(Object::getClass).toArray(Class[]::new);
                 if (typeArray.length == 0) {
                     methodToCall = cls.getDeclaredMethod(splitMethod[splitMethod.length - 1]);
                 } else {
                     methodToCall = cls.getDeclaredMethod(splitMethod[splitMethod.length - 1],
-                            Arrays.stream(objArgs).sequential().map(Object::getClass).toArray(Class[]::new));
+                            Arrays.stream(objArgs).sequential().map((o) -> getPrimitiveClass(o.getClass()))
+                                    .toArray(Class<?>[]::new));
                 }
                 methodToCall.setAccessible(true);
                 if (!Modifier.isStatic(methodToCall.getModifiers())) {
@@ -105,12 +108,14 @@ public class SendableCommand {
                     instance = getInstance.invoke(null);
                 }
             } catch (ClassNotFoundException e) {
-                DriverStation.reportError("Class not found: " + className, e.getStackTrace());
+                DriverStation.reportError("Class not found: " + className + ". " + e.getMessage(), e.getStackTrace());
             } catch (NoSuchMethodException e) {
-                DriverStation.reportError("Could not find method : " + splitMethod[splitMethod.length - 1] + " in class " + className, e.getStackTrace());
+                DriverStation.reportError(
+                        "Could not find method : " + splitMethod[splitMethod.length - 1] + " in class " + className + ". " + e.getMessage(),
+                        e.getStackTrace());
             } catch (InvocationTargetException | IllegalAccessException e) {
                 DriverStation.reportError("Could not get singleton reference in class " + className + " for method: " +
-                        splitMethod[splitMethod.length - 1], e.getStackTrace());
+                        splitMethod[splitMethod.length - 1] + ". " + e.getMessage(), e.getStackTrace());
             }
         }
 
@@ -118,33 +123,52 @@ public class SendableCommand {
         this.instance = instance;
     }
 
-    @JsonIgnoreProperties final Object instance;
+    @JsonIgnoreProperties
+    final @Nullable Object instance;
 
-    @JsonIgnoreProperties final Method methodToCall;
+    @JsonIgnoreProperties
+    final @Nullable Method methodToCall;
 
-    @JsonIgnoreProperties final Object[] objArgs;
+    @JsonIgnoreProperties final Object @NotNull [] objArgs;
+
+    private static Class<?> getPrimitiveClass(Class<?> clazz) {
+        if (clazz.equals(Integer.class)) {
+            return double.class;
+        } else if (clazz.equals(Double.class)) {
+            return double.class;
+        } else if (clazz.equals(Boolean.class)) {
+            return boolean.class;
+        } else if (clazz.equals(char.class)) {
+            return char.class;
+        } else if (clazz.equals(Byte.class)) {
+            return byte.class;
+        } else if (clazz.equals(Short.class)) {
+            return short.class;
+        } else if (clazz.equals(Long.class)) {
+            return long.class;
+        } else if (clazz.equals(Float.class)) {
+            return float.class;
+        } else if (clazz.equals(String.class)) {
+            return String.class;
+        } else {
+            return clazz;
+        }
+    }
 
 
     /**
-     * @return false if the command fails to execute
+     * @throws InterruptedException            If the command fails do to an interrupt
+     * @throws CommandExecutionFailedException If the command fails to execute for any other reason
      */
-    public boolean execute() {
-        if (methodToCall == null) {
+    public void execute() throws InterruptedException, CommandExecutionFailedException {
+        if (methodToCall == null && reflection) {
             DriverStation.reportError("Method to call is null", Thread.currentThread().getStackTrace());
-            return false;
+            throw new CommandExecutionFailedException("Method to call is null");
         }
-        if (reflection) {
-            try {
+        try {
+            if (reflection) {
                 methodToCall.invoke(instance, objArgs);
-            } catch (IllegalAccessException e) {
-                DriverStation.reportError("Could not access method " + methodName, e.getStackTrace());
-                return false;
-            } catch (InvocationTargetException e) {
-                DriverStation.reportError("Method: " + methodName + " threw an exception while being invoked", e.getStackTrace());
-                return false;
-            }
-        } else {
-            try {
+            } else {
                 switch (methodName) {
                     case "print":
                         System.out.println(objArgs[0]);
@@ -153,14 +177,13 @@ public class SendableCommand {
                         Thread.sleep((long) objArgs[0]);
                         break;
                 }
-            } catch (InterruptedException e) {
-                DriverStation.reportError("Thread interrupted while sleeping", e.getStackTrace());
-                return false;
-            } catch (Exception e) {
-                DriverStation.reportError("Could not invoke method " + methodName, e.getStackTrace());
-                return false;
             }
+        } catch (InterruptedException e) {
+            throw new InterruptedException("Interrupted while executing a script");
+        } catch (Exception e) {
+            DriverStation.reportError("Could not invoke method " + methodName + " due to: " + e.getMessage(),
+                    e.getStackTrace());
+            throw new CommandExecutionFailedException("Could not invoke method " + methodName + " due to: " + e.getMessage(), e);
         }
-        return true;
     }
 }

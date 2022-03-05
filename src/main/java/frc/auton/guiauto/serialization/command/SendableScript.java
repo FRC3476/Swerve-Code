@@ -15,15 +15,13 @@ import java.util.List;
 public class SendableScript implements Comparable<SendableScript> {
 
     /**
-     * @return false if the script fails to execute
+     * @throws InterruptedException if the thread is interrupted while executing the commands
      */
-    public boolean execute() {
+    public void execute() throws InterruptedException, CommandExecutionFailedException {
         for (SendableCommand command : commands) {
-            if (!command.execute()) {
-                return false;
-            }
+            if (Thread.interrupted()) throw new InterruptedException("Interrupted while trying to execute a script ");
+            command.execute();
         }
-        return true;
     }
 
     public enum DelayType {
