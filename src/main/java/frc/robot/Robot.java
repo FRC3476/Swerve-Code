@@ -5,10 +5,9 @@
 package frc.robot;
 
 import edu.wpi.first.math.geometry.Pose2d;
-import edu.wpi.first.networktables.NetworkTable;
-import edu.wpi.first.networktables.NetworkTableEntry;
-import edu.wpi.first.networktables.NetworkTableInstance;
+import edu.wpi.first.networktables.*;
 import edu.wpi.first.wpilibj.TimedRobot;
+import edu.wpi.first.wpilibj.Timer;
 import edu.wpi.first.wpilibj.smartdashboard.SendableChooser;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import frc.auton.TemplateAuto;
@@ -22,10 +21,14 @@ import frc.utility.Controller;
 import frc.utility.ControllerDriveInputs;
 import frc.utility.Limelight;
 import frc.utility.OrangeUtility;
+import org.jetbrains.annotations.NotNull;
 
 import java.io.File;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
+import java.util.function.Consumer;
 
 /**
  * The VM is configured to automatically run this class, and to call the functions corresponding to each mode, as described in the
@@ -46,7 +49,9 @@ public class Robot extends TimedRobot {
     NetworkTableEntry pathProcessingStatusEntry = autoDataTable.getEntry("processing");
     NetworkTableEntry pathProcessingStatusIdEntry = autoDataTable.getEntry("processingid");
 
+    private final @NotNull Lock networkAutoLock = new ReentrantLock();
     NetworkAuto networkAuto;
+
     String lastAutoPath = null;
 
     ExecutorService deserializerExecutor = Executors.newSingleThreadExecutor();
@@ -73,14 +78,44 @@ public class Robot extends TimedRobot {
     //Control loop states
     boolean limelightTakeSnapshots;
 
+    Consumer<EntryNotification> autoPathListener = (event ->
+            deserializerExecutor.execute(() -> { //Start deserializing on another thread
+                        System.out.println("starting to parse autonomous");
+                        //Set networktable entries for the gui notifications
+                        pathProcessingStatusEntry.setDouble(1);
+                        pathProcessingStatusIdEntry.setDouble(pathProcessingStatusIdEntry.getDouble(0) + 1);
+                        networkAutoLock.lock();
+                        try {
+                            networkAuto = new NetworkAuto(); //Create the auto object which will start deserializing the json
+                            // and the auto
+                        } finally {
+                            networkAutoLock.unlock();
+                        }
+
+                        // ready to be run
+                        System.out.println("done parsing autonomous");
+                        //Set networktable entries for the gui notifications
+                        pathProcessingStatusEntry.setDouble(2);
+                        pathProcessingStatusIdEntry.setDouble(pathProcessingStatusIdEntry.getDouble(0) + 1);
+                    }
+            ));
+
+
     /**
      * This function is run when the robot is first started up and should be used for any initialization code.
      */
     @Override
     public void robotInit() {
+        if (autoPath.getString(null) != null) {
+            autoPathListener.accept(new EntryNotification(NetworkTableInstance.getDefault(), 1, 1, "", null, 12));
+        }
+
+        autoPath.addListener(autoPathListener, EntryListenerFlags.kNew | EntryListenerFlags.kUpdate);
+
         autoChooser.setDefaultOption("Default Auto", DEFAULT_AUTO);
         autoChooser.addOption("My Auto", CUSTOM_AUTO);
         SmartDashboard.putData("Auto choices", autoChooser);
+
 
         startSubsystems();
         drive.resetGyro();
@@ -140,16 +175,25 @@ public class Robot extends TimedRobot {
     @Override
     public void autonomousInit() {
         enabled.setBoolean(true);
-        startSubsystems();
+        drive.configBrake();
 
-        if (networkAuto == null) {
-            System.out.println("Using normal autos");
-            selectedAuto = null; //TODO put an actual auto here
-            //TODO put autos here
-        } else {
-            System.out.println("Using autos from network tables");
-            selectedAuto = networkAuto;
+        networkAutoLock.lock();
+        try {
+            if (networkAuto == null) {
+                System.out.println("Using normal autos");
+                String auto = autoChooser.getSelected();
+                switch (auto) {
+                    //Put all your autos here
+                }
+            } else {
+                System.out.println("Using autos from network tables");
+                selectedAuto = networkAuto;
+            }
+        } finally {
+            networkAutoLock.unlock();
         }
+
+        assert selectedAuto != null;
         //Since autonomous objects can be reused they need to be reset them before we can reuse them again 
         selectedAuto.reset();
 
@@ -236,15 +280,24 @@ public class Robot extends TimedRobot {
     }
 
     public synchronized void killAuto() {
+        System.out.println("Killing Auto");
         if (selectedAuto != null) {
-            selectedAuto.killSwitch();
-        }
+            assert autoThread != null;
+            autoThread.interrupt();
+            double nextStackTracePrint = Timer.getFPGATimestamp() + 1;
+            while (!(selectedAuto.isFinished() || autoThread.getState() == Thread.State.TERMINATED)) {
+                if (Timer.getFPGATimestamp() > nextStackTracePrint) {
+                    Exception throwable = new Exception(
+                            "Waiting for auto to die. selectedAuto.isFinished() = " + selectedAuto.isFinished() +
+                                    " autoThread.getState() = " + autoThread.getState());
+                    throwable.setStackTrace(autoThread.getStackTrace());
+                    throwable.printStackTrace();
+                    nextStackTracePrint = Timer.getFPGATimestamp() + 5;
+                }
 
-        if (selectedAuto != null) {
-            //auto.interrupt();
-            //while(!auto.isInterrupted());
-            while (autoThread.getState() != Thread.State.TERMINATED) ;
 
+                OrangeUtility.sleep(10);
+            }
             drive.stopMovement();
             drive.setTeleop();
         }

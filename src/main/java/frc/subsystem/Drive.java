@@ -29,6 +29,9 @@ import frc.robot.Constants;
 import frc.utility.ControllerDriveInputs;
 import frc.utility.controllers.LazyCANSparkMax;
 
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
+
 
 public final class Drive extends AbstractSubsystem {
 
@@ -164,11 +167,11 @@ public final class Drive extends AbstractSubsystem {
         return swerveKinematics;
     }
 
-    public void setDriveState(DriveState driveState) {
+    public synchronized void setDriveState(DriveState driveState) {
         this.driveState = driveState;
     }
 
-    private void configBrake() {
+    public void configBrake() {
         //TODO
     }
 
@@ -365,40 +368,59 @@ public final class Drive extends AbstractSubsystem {
     }
 
     double autoStartTime;
-    HolonomicDriveController controller = new HolonomicDriveController(
-            new PIDController(1.5, 0, 0),
-            new PIDController(1.5, 0, 0),
-            new ProfiledPIDController(5, 0, 0, new TrapezoidProfile.Constraints(6, 5)));
+    private final ProfiledPIDController autoTurnPIDController = new ProfiledPIDController(8, 0, 0.01,
+            new TrapezoidProfile.Constraints(4, 4));
 
     {
-        controller.setTolerance(new Pose2d(0.5, 0.5, Rotation2d.fromDegrees(10))); //TODO: Tune
+        autoTurnPIDController.enableContinuousInput(-Math.PI, Math.PI);
+        autoTurnPIDController.setTolerance(Math.toRadians(10));
+    }
+
+    HolonomicDriveController swerveAutoController = new HolonomicDriveController(
+            new PIDController(1.5, 0, 0),
+            new PIDController(1.5, 0, 0),
+            autoTurnPIDController);
+
+    {
+        swerveAutoController.setTolerance(new Pose2d(0.5, 0.5, Rotation2d.fromDegrees(10))); //TODO: Tune
     }
 
 
-    public synchronized void setAutoPath(Trajectory trajectory) {
-        driveState = DriveState.RAMSETE;
-        this.currentAutoTrajectory = trajectory;
-        autoStartTime = Timer.getFPGATimestamp();
-        configAuto();
-        configCoast();
+    public void setAutoPath(Trajectory trajectory) {
+        currentAutoTrajectoryLock.lock();
+        try {
+            autoTurnPIDController.reset(RobotTracker.getInstance().getGyroAngle().getRadians());
+            setDriveState(DriveState.RAMSETE);
+            this.currentAutoTrajectory = trajectory;
+            autoStartTime = Timer.getFPGATimestamp();
+        } finally {
+            currentAutoTrajectoryLock.unlock();
+        }
     }
 
+    final Lock currentAutoTrajectoryLock = new ReentrantLock();
     Trajectory currentAutoTrajectory;
-    Rotation2d autoTargetHeading;
+    volatile Rotation2d autoTargetHeading;
 
     private void updateRamsete() {
-        Trajectory.State goal = currentAutoTrajectory.sample(Timer.getFPGATimestamp() - autoStartTime);
-        System.out.println(goal);
-        ChassisSpeeds adjustedSpeeds = controller.calculate(RobotTracker.getInstance().getPoseMeters(), goal,
-                autoTargetHeading);
-        swerveDrive(adjustedSpeeds);
-        //System.out.println(ramseteController.atReference());
-        //System.out.println("target speed" + Units.metersToInches(wheelspeeds.leftMetersPerSecond) + " " + Units
-        // .metersToInches(wheelspeeds.rightMetersPerSecond) + "time: " +(Timer.getFPGATimestamp()-autoStartTime) );
-        //TODO: not working
-        if (controller.atReference() && (Timer.getFPGATimestamp() - autoStartTime) >= currentAutoTrajectory.getTotalTimeSeconds()) {
-            driveState = DriveState.DONE;
-            stopMovement();
+        currentAutoTrajectoryLock.lock();
+        try {
+            Trajectory.State goal = currentAutoTrajectory.sample(Timer.getFPGATimestamp() - autoStartTime);
+
+            Rotation2d targetHeading = autoTargetHeading;
+
+            ChassisSpeeds adjustedSpeeds = swerveAutoController.calculate(
+                    RobotTracker.getInstance().getPoseMeters(),
+                    goal,
+                    targetHeading);
+
+            swerveDrive(adjustedSpeeds);
+            if (swerveAutoController.atReference() && (Timer.getFPGATimestamp() - autoStartTime) >= currentAutoTrajectory.getTotalTimeSeconds()) {
+                setDriveState(DriveState.DONE);
+                stopMovement();
+            }
+        } finally {
+            currentAutoTrajectoryLock.unlock();
         }
     }
 
