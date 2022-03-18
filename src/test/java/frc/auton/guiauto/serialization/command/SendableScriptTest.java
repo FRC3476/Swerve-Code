@@ -42,16 +42,16 @@ class SendableScriptTest {
 
     @Disabled
     void testScriptExecution() throws NoSuchFieldException, IllegalAccessException {
-        //        List<SendableCommand> commandList = new ArrayList<>();
-        //        commandList.add(new SendableCommand(Drive.class.getName() + ".setDriveState", new String[]{"TELEOP"},
-        //                new String[]{Drive.DriveState.class.getName()}, true));
-        //
-        //        SendableScript sendableScript = new SendableScript(SendableScript.DelayType.NONE, 0, commandList);
-        //
-        //        assertTrue(sendableScript.execute());
-        //
-        //        Field driveState = Drive.class.getDeclaredField("driveState"); //Use reflection to access private field
-        //        driveState.setAccessible(true);
-        //        assertEquals(Drive.DriveState.TELEOP, driveState.get(Drive.getInstance()));
+//        List<SendableCommand> commandList = new ArrayList<>();
+//        commandList.add(new SendableCommand(Drive.class.getName() + ".setDriveState", new String[]{"TELEOP"},
+//                new String[]{Drive.DriveState.class.getName()}, true));
+//
+//        SendableScript sendableScript = new SendableScript(SendableScript.DelayType.NONE, 0, commandList);
+//
+//        assertTrue(sendableScript.execute());
+//
+//        Field driveState = Drive.class.getDeclaredField("driveState"); //Use reflection to access private field
+//        driveState.setAccessible(true);
+//        assertEquals(Drive.DriveState.TELEOP, driveState.get(Drive.getInstance()));
     }
 }
